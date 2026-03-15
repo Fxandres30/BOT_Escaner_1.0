@@ -1,0 +1,9 @@
+{
+  "watch": ["index.js", "functions"],
+  "ignore": [
+    "auth_info_baileys",
+    "node_modules",
+    "*.json",
+    "*.log"
+  ]
+}
