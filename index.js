@@ -1,7 +1,5 @@
 // @ts-nocheck
 import "dotenv/config";
-import dotenv from "dotenv";
-dotenv.config();
 
 import makeWASocket, {
   DisconnectReason,
@@ -13,13 +11,14 @@ import qrcode from "qrcode-terminal";
 import { Boom } from "@hapi/boom";
 
 import { guardarUsuario } from "./functions/guardarUsuario.js";
+import { escanearGrupos } from "./functions/escanearGrupo.js";
 
 console.log("🚀 BOT ESCÁNER INICIADO");
 
 let sock;
 let starting = false;
 
-const gruposCache = {};
+// ================= 🚀 BOT =================
 
 async function startBot() {
 
@@ -55,9 +54,8 @@ async function startBot() {
         console.log("✅ CONECTADO A WHATSAPP");
         starting = false;
 
-        // 🔎 escaneo inicial al conectar
-        setTimeout(escanearGrupos, 5000);
-
+        // 🔥 ESCANEO INICIAL
+        setTimeout(() => escanearGrupos(sock), 5000);
       }
 
       if (connection === "close") {
@@ -66,136 +64,78 @@ async function startBot() {
           new Boom(lastDisconnect?.error)?.output?.statusCode;
 
         if (statusCode === DisconnectReason.loggedOut) {
-
           console.log("🚫 Sesión cerrada");
           process.exit(1);
-
         }
 
         starting = false;
         setTimeout(startBot, 5000);
-
       }
 
     });
 
-    // 📩 MENSAJES
-    sock.ev.on("messages.upsert", async ({ messages }) => {
+   // ================= 📩 MENSAJES (TIEMPO REAL) =================
 
-      for (const msg of messages) {
+sock.ev.on("messages.upsert", async ({ messages }) => {
 
-        if (!msg?.key) continue;
+  for (const msg of messages) {
 
-        const grupoId = msg.key.remoteJid;
+    if (!msg?.key) continue;
+    if (msg.key.fromMe) continue;
 
-        if (!grupoId?.endsWith("@g.us")) continue;
+    const grupoId = msg.key.remoteJid;
+    if (!grupoId?.endsWith("@g.us")) continue;
 
-        if (!gruposCache[grupoId]) {
+    const jid = msg?.key?.participant || null;
 
-          try {
+    let lid = null;
+    let telefono = null;
 
-            const metadata = await sock.groupMetadata(grupoId);
+    if (jid?.endsWith("@s.whatsapp.net")) {
+      telefono = jid.split("@")[0];
+      lid = jid;
+    }
 
-            gruposCache[grupoId] = metadata.subject;
+    if (jid?.endsWith("@lid")) {
+      lid = jid;
+    }
 
-          } catch {
+    if (msg?.key?.participantPn) {
+      telefono = msg.key.participantPn.split("@")[0];
+    }
 
-            gruposCache[grupoId] = "grupo_desconocido";
+    const nombre = msg?.pushName || null;
 
-          }
+    console.log("👤", nombre, "| 🆔", lid, "| 📞", telefono);
 
-        }
-
-        const grupoNombre = gruposCache[grupoId];
-
-        const lid = msg?.key?.participant || null;
-
-        const nombre = msg?.pushName || null;
-
-        const telefonoRaw = msg?.key?.participantPn || null;
-
-        const telefono = telefonoRaw
-          ? telefonoRaw.split("@")[0]
-          : null;
-
-        console.log("📌 Grupo:", grupoNombre);
-        console.log("👤 Usuario:", nombre);
-        console.log("🆔 LID:", lid);
-        console.log("📞 Teléfono:", telefono);
-        console.log("----------------------");
-
-        if (lid) {
-
-          await guardarUsuario({
-            lid,
-            telefono,
-            nombre,
-            grupo_id: grupoId,
-            grupo_nombre: grupoNombre
-          });
-
-        }
-
-      }
-
-    });
-
-  } catch (err) {
-
-    console.error("❌ Error crítico:", err);
-
-    starting = false;
-
-    setTimeout(startBot, 5000);
-
-  }
-
-}
-
-// 🔎 ESCANEO DE GRUPOS
-async function escanearGrupos() {
-
-  console.log("🔎 Iniciando escaneo de grupos...");
-
-  for (const grupoId of Object.keys(gruposCache)) {
-
-    try {
-
-      const metadata = await sock.groupMetadata(grupoId);
-
-      const grupoNombre = metadata.subject;
-
-      console.log("📌 Escaneando:", grupoNombre);
-
-      for (const participante of metadata.participants) {
-
-        const lid = participante.id;
-
-        await guardarUsuario({
-          lid,
-          telefono: null,
-          nombre: null,
-          grupo_id: grupoId,
-          grupo_nombre: grupoNombre
-        });
-
-      }
-
-    } catch (err) {
-
-      console.log("❌ Error escaneando grupo:", err.message);
-
+    if (lid || telefono) {
+      await guardarUsuario({
+        lid,
+        telefono,
+        nombre
+      });
     }
 
   }
 
-}
+}); // ✅ cierre evento
 
-// ⏰ ESCANEO AUTOMÁTICO CADA 6 HORAS
+  } catch (err) {
+
+    console.error("❌ Error crítico:", err);
+    starting = false;
+    setTimeout(startBot, 5000);
+
+  }
+
+} // ✅ cierre de startBot
+
+// ================= 🔎 ESCÁNER AUTOMÁTICO =================
+
+// 🔁 cada 6 horas
 setInterval(() => {
-
-  escanearGrupos();
-
+  if (sock) escanearGrupos(sock);
 }, 6 * 60 * 60 * 1000);
 
+// 🚀 START
 startBot();

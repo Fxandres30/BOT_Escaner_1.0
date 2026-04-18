@@ -1,73 +1,128 @@
-import { supabase } from "./supabase.js";
+import { supabase } from "./supabase.js"
+
+// ================= LIMPIAR TEL =================
 
 function limpiarTelefono(numero) {
-  if (!numero) return null;
+  if (!numero) return null
 
-  numero = numero.replace(/\D/g, "");
+  let limpio = numero.replace(/\D/g, "")
 
-  if (numero.startsWith("57") && numero.length === 12) {
-    numero = numero.substring(2);
+  // 🇨🇴 quitar 57
+  if (limpio.startsWith("57") && limpio.length === 12) {
+    limpio = limpio.slice(2)
   }
 
-  return numero;
+  // validar celular colombiano
+  if (limpio.length !== 10) return null
+  if (!limpio.startsWith("3")) return null
+
+  return limpio
 }
 
-export async function guardarUsuario(data) {
+// ================= GUARDAR =================
 
-  const { lid, telefono, nombre, grupo_id, grupo_nombre } = data;
+export async function guardarUsuario({ lid, telefono, nombre }) {
+  try {
 
-  if (!lid) return;
+    const telefonoLimpio = limpiarTelefono(telefono)
 
-  const telefonoLimpio = limpiarTelefono(telefono);
+    let usuario = null
 
-  const { data: usuario } = await supabase
-    .from("usuarios")
-    .select("*")
-    .eq("lid", lid)
-    .maybeSingle();
+    // ================= 🔍 BUSCAR POR LID =================
+    if (lid) {
+      const { data, error } = await supabase
+        .from("usuarios")
+        .select("*")
+        .eq("lid", lid)
+        .maybeSingle()
 
-  // 🔹 Usuario nuevo
-  if (!usuario) {
+      if (error) {
+        console.log(`❌ DB ERROR | buscar lid | ${lid} | ${error.message}`)
+        return
+      }
 
-    const { error } = await supabase
-      .from("usuarios")
-      .insert({
-        lid,
-        telefono: telefonoLimpio,
-        nombre,
-        grupo_id,
-        grupo_nombre,
-        ultima_actividad: new Date()
-      });
-
-    if (error) {
-      console.log("❌ Error guardando:", error.message);
-    } else {
-      console.log("✅ Usuario nuevo:", nombre);
+      if (data) usuario = data
     }
 
-    return;
+    // ================= 🔍 BUSCAR POR TEL =================
+    if (!usuario && telefonoLimpio) {
+      const { data, error } = await supabase
+        .from("usuarios")
+        .select("*")
+        .eq("telefono", telefonoLimpio)
+        .maybeSingle()
+
+      if (error) {
+        console.log(`❌ DB ERROR | buscar tel | ${telefonoLimpio} | ${error.message}`)
+        return
+      }
+
+      if (data) usuario = data
+    }
+
+    // ================= 🆕 NUEVO =================
+    if (!usuario) {
+
+      await supabase
+        .from("usuarios")
+        .insert({
+          lid: lid || null,
+          telefono: telefonoLimpio || null,
+          nombre: nombre || null,
+          created_at: new Date(),
+          ultima_actividad: new Date()
+        })
+
+      console.log(
+        `🆕 NUEVO | 👤 ${nombre || "sin_nombre"} | 🆔 ${lid} | 📞 ${telefonoLimpio || "null"}`
+      )
+
+      return
+    }
+
+    // ================= 🔄 UNIFICAR =================
+
+    let update = {
+      ultima_actividad: new Date()
+    }
+
+    let cambios = false
+
+    // 🔥 agregar lid si no existe
+    if (!usuario.lid && lid) {
+      update.lid = lid
+      cambios = true
+      console.log(`🔗 LID AGREGADO | ${lid}`)
+    }
+
+    // 🔥 agregar teléfono si no existe
+    if (!usuario.telefono && telefonoLimpio) {
+      update.telefono = telefonoLimpio
+      cambios = true
+      console.log(`📱 TEL AGREGADO | ${telefonoLimpio}`)
+    }
+
+    // 🔥 actualizar nombre si no existe
+    if (!usuario.nombre && nombre) {
+      update.nombre = nombre
+      cambios = true
+      console.log(`✏️ NOMBRE AGREGADO | ${nombre}`)
+    }
+
+    // ================= UPDATE =================
+
+    await supabase
+      .from("usuarios")
+      .update(update)
+      .eq("id", usuario.id)
+
+    console.log(
+      cambios
+        ? `✅ MERGE | ${usuario.id}`
+        : `🔄 ACTIVO | ${usuario.id}`
+    )
+
+  } catch (err) {
+    console.log(`❌ ERROR GLOBAL | ${lid} | ${err.message}`)
   }
-
-  // 🔹 Usuario existente
-  const updateData = {
-    nombre,
-    grupo_nombre,
-    ultima_actividad: new Date()
-  };
-
-  // solo guardar teléfono si aún no existe
-  if (!usuario.telefono && telefonoLimpio) {
-    updateData.telefono = telefonoLimpio;
-  }
-
-  const { error } = await supabase
-    .from("usuarios")
-    .update(updateData)
-    .eq("lid", lid);
-
-  if (error) {
-    console.log("❌ Error actualizando:", error.message);
-  }
-
 }
